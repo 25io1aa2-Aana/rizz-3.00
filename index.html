@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RIZZ 3.0 — ESP32 Surveillance Car</title>
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/svg+xml" href="images/favicon.svg">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ================================================================
+     HEADER
+     ================================================================ -->
+<header>
+  <div class="logo">
+    RIZZ <span>3.0</span>
+  </div>
+
+  <div class="header-status">
+    <span>
+      <span class="status-dot offline" id="conn-dot"></span>
+      <span id="conn-text">STANDBY</span>
+    </span>
+    <span id="uptime-display">00:00:00</span>
+    <span class="badge live" id="live-badge" style="display:none">● REC</span>
+    <span class="badge online">ESP32-CAM</span>
+  </div>
+</header>
+
+<!-- ================================================================
+     WIDGET NAVIGATION TABS
+     ================================================================ -->
+<div class="widget-tabs">
+  <button class="tab-btn active"  onclick="switchTab('controller')">⬦ Controller</button>
+  <button class="tab-btn"         onclick="switchTab('gps')">⬦ GPS Path</button>
+  <button class="tab-btn"         onclick="switchTab('nightvision')">⬦ Night Vision</button>
+  <button class="tab-btn"         onclick="switchTab('advantages')">⬦ Advantages</button>
+</div>
+
+<!-- ================================================================
+     TAB 1 — CONTROLLER
+     ================================================================ -->
+<div class="main-grid full-tab active" id="tab-controller">
+
+  <!-- ── LIVE CAMERA FEED ── -->
+  <div class="cam-panel">
+    <div class="cam-feed" id="cam-feed">
+
+      <!-- Placeholder shown when no stream is connected -->
+      <div class="cam-placeholder" id="cam-placeholder">
+        <img src="images/logo.svg" class="cam-logo-img" alt="RIZZ 3.0 Logo">
+        <div class="cam-crosshair"></div>
+        <div class="cam-label">AWAITING STREAM · ESP32-CAM</div>
+        <div class="cam-label" style="font-size:10px;opacity:0.5">Enter IP address to connect</div>
+      </div>
+
+      <!-- Actual MJPEG stream iframe (shown after connect) -->
+      <iframe class="cam-iframe" id="cam-iframe"
+              allow="camera" title="Live Camera Feed"></iframe>
+    </div>
+
+    <!-- HUD overlays -->
+    <div class="hud-tl">
+      <div class="hud-line hud-accent" id="hud-time">--:--:--</div>
+      <div class="hud-line"            id="hud-date">---- -- --</div>
+      <div class="hud-line"            id="hud-fps">FPS: --</div>
+    </div>
+    <div class="hud-tr">
+      <div class="hud-line hud-accent" id="hud-ip">IP: ---</div>
+      <div class="hud-line"            id="hud-speed">SPEED: 0%</div>
+      <div class="hud-line"            id="hud-dir">DIR: STOP</div>
+    </div>
+    <div class="hud-bl">
+      <div class="hud-line" id="hud-nv-status">NIGHT VIS: <span class="hud-accent">OFF</span></div>
+      <div class="hud-line" id="hud-gps-fix">GPS: <span class="hud-accent">NO FIX</span></div>
+    </div>
+    <div class="hud-br">
+      <div class="hud-line" id="hud-lat">LAT: --</div>
+      <div class="hud-line" id="hud-lng">LNG: --</div>
+    </div>
+
+    <!-- Corner bracket decorations -->
+    <div class="corner tl"></div>
+    <div class="corner tr"></div>
+    <div class="corner bl"></div>
+    <div class="corner br"></div>
+
+    <!-- REC badge (shown when recording) -->
+    <div class="rec-badge" id="rec-badge" style="display:none">
+      <div class="rec-dot"></div> REC
+    </div>
+  </div><!-- /cam-panel -->
+
+  <!-- ── RIGHT CONTROL PANEL ── -->
+  <div class="right-panel">
+
+    <!-- IP Connect -->
+    <div class="section">
+      <div class="section-title">Connect Device</div>
+      <div class="ip-row">
+        <input class="ip-input" type="text" id="ip-input"
+               placeholder="192.168.x.x" autocomplete="off">
+        <button class="btn success" onclick="connectDevice()">Connect</button>
+      </div>
+      <div class="ip-row">
+        <button class="btn" style="flex:1" onclick="openStream()">📷 Open Stream</button>
+        <button class="btn danger" onclick="disconnectDevice()">Disconnect</button>
+      </div>
+
+      <!-- Live gauges -->
+      <div class="gauge-row">
+        <div class="gauge">
+          <div class="gauge-val" id="g-speed">0</div>
+          <div class="gauge-lbl">SPEED %</div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-val" id="g-heading" style="color:var(--accent2)">0°</div>
+          <div class="gauge-lbl">HEADING</div>
+        </div>
+        <div class="gauge">
+          <div class="gauge-val" id="g-signal" style="color:var(--warn)">--</div>
+          <div class="gauge-lbl">RSSI dBm</div>
+        </div>
+      </div>
+    </div><!-- /section: connect -->
+
+    <!-- Joystick -->
+    <div class="section">
+      <div class="section-title">Joystick Control</div>
+      <div class="joystick-area">
+        <canvas id="joystick-canvas" width="160" height="160"
+                aria-label="Virtual joystick — drag to steer"></canvas>
+        <div class="joystick-vals">
+          X: <span id="jx">0.00</span> &nbsp; Y: <span id="jy">0.00</span><br>
+          CMD: <span id="jcmd">STOP</span>
+        </div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--textd);text-align:center;margin-top:4px">
+          Drag joystick or use WASD / Arrow keys
+        </div>
+        <!-- Keyboard visual hint -->
+        <div class="kbd-hint">
+          <div class="key blank"></div>
+          <div class="key" id="key-w">W</div>
+          <div class="key blank"></div>
+          <div class="key" id="key-a">A</div>
+          <div class="key" id="key-s">S</div>
+          <div class="key" id="key-d">D</div>
+        </div>
+      </div>
+    </div><!-- /section: joystick -->
+
+    <!-- System Controls (on/off switches) -->
+    <div class="section">
+      <div class="section-title">System Controls</div>
+      <div class="control-grid">
+
+        <div class="ctrl-card" id="ctrl-power" onclick="toggleCtrl('power')">
+          <div class="ctrl-name">Power</div>
+          <div class="ctrl-toggle">
+            <div class="toggle" id="tog-power"></div>
+            <div class="ctrl-status off" id="stat-power">OFF</div>
+          </div>
+        </div>
+
+        <div class="ctrl-card" id="ctrl-cam" onclick="toggleCtrl('cam')">
+          <div class="ctrl-name">Camera</div>
+          <div class="ctrl-toggle">
+            <div class="toggle" id="tog-cam"></div>
+            <div class="ctrl-status off" id="stat-cam">OFF</div>
+          </div>
+        </div>
+
+        <div class="ctrl-card" id="ctrl-nv" onclick="toggleCtrl('nv')">
+          <div class="ctrl-name">Night Vision</div>
+          <div class="ctrl-toggle">
+            <div class="toggle green-t" id="tog-nv"></div>
+            <div class="ctrl-status off" id="stat-nv">OFF</div>
+          </div>
+        </div>
+
+        <div class="ctrl-card" id="ctrl-gps" onclick="toggleCtrl('gps')">
+          <div class="ctrl-name">GPS Track</div>
+          <div class="ctrl-toggle">
+            <div class="toggle green-t" id="tog-gps"></div>
+            <div class="ctrl-status off" id="stat-gps">OFF</div>
+          </div>
+        </div>
+
+        <div class="ctrl-card" id="ctrl-rec" onclick="toggleCtrl('rec')">
+          <div class="ctrl-name">Recording</div>
+          <div class="ctrl-toggle">
+            <div class="toggle" id="tog-rec"></div>
+            <div class="ctrl-status off" id="stat-rec">OFF</div>
+          </div>
+        </div>
+
+        <div class="ctrl-card" id="ctrl-led" onclick="toggleCtrl('led')">
+          <div class="ctrl-name">IR LEDs</div>
+          <div class="ctrl-toggle">
+            <div class="toggle green-t" id="tog-led"></div>
+            <div class="ctrl-status off" id="stat-led">OFF</div>
+          </div>
+        </div>
+
+      </div>
+    </div><!-- /section: controls -->
+
+  </div><!-- /right-panel -->
+
+</div><!-- /tab-controller -->
+
+
+<!-- ================================================================
+     TAB 2 — GPS PATH
+     ================================================================ -->
+<div class="main-grid full-tab" id="tab-gps"
+     style="grid-template-columns:1fr 320px">
+
+  <!-- Map area -->
+  <div style="background:var(--bg);padding:20px;display:flex;flex-direction:column;gap:16px;overflow:hidden">
+
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <img src="images/gps-icon.svg" width="32" height="32" alt="GPS" style="opacity:0.7">
+          <div>
+            <div style="font-family:var(--head);font-size:18px;letter-spacing:3px;color:var(--accent)">GPS PATH RECORDER</div>
+            <div style="font-family:var(--mono);font-size:10px;color:var(--textd);margin-top:2px;letter-spacing:2px">REAL-TIME ROUTE MAPPING · NEO-6M MODULE</div>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <span class="badge info" id="gps-fix-badge">NO FIX</span>
+        <span class="badge online" id="pts-badge">0 PTS</span>
+      </div>
+    </div>
+
+    <div id="map-container" style="flex:1;min-height:400px">
+      <canvas id="map-canvas"></canvas>
+    </div>
+
+    <div class="map-controls">
+      <button class="btn success" onclick="startGPSRecord()">▶ Start Recording</button>
+      <button class="btn danger"  onclick="stopGPSRecord()">■ Stop</button>
+      <button class="btn"         onclick="clearPath()">✕ Clear Path</button>
+      <button class="btn"         onclick="exportPath()">↓ Export KML</button>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">
+      <div class="map-stat"><div class="map-stat-label">Waypoints</div><div class="map-stat-val" id="stat-wpts">0</div></div>
+      <div class="map-stat"><div class="map-stat-label">Distance</div><div class="map-stat-val" id="stat-dist">0 m</div></div>
+      <div class="map-stat"><div class="map-stat-label">Duration</div><div class="map-stat-val" id="stat-dur">00:00</div></div>
+      <div class="map-stat"><div class="map-stat-label">Avg Speed</div><div class="map-stat-val" id="stat-spd">0 m/s</div></div>
+    </div>
+  </div>
+
+  <!-- GPS side panel -->
+  <div class="right-panel" style="border-left:1px solid var(--border2)">
+
+    <div class="section">
+      <div class="section-title">Current Position</div>
+      <div style="font-family:var(--mono);font-size:12px;line-height:2.2;color:var(--textd)">
+        <div>LAT &nbsp;<span style="color:var(--accent2)" id="pos-lat">---.------</span></div>
+        <div>LNG &nbsp;<span style="color:var(--accent2)" id="pos-lng">---.------</span></div>
+        <div>ALT &nbsp;<span style="color:var(--accent)"  id="pos-alt">--- m</span></div>
+        <div>SAT &nbsp;<span style="color:var(--warn)"    id="pos-sat">0</span></div>
+        <div>HDOP <span style="color:var(--textd)"        id="pos-hdop">--</span></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Path Waypoints</div>
+      <div id="waypoints-list"
+           style="font-family:var(--mono);font-size:10px;color:var(--textd);max-height:260px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
+        <div style="opacity:0.5">No waypoints recorded</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">GPS Settings</div>
+      <div class="ir-slider">
+        <label>Update Rate <span id="gps-rate-val">1 Hz</span></label>
+        <input type="range" min="1" max="10" value="1"
+               oninput="document.getElementById('gps-rate-val').textContent=this.value+' Hz'">
+      </div>
+      <div style="height:10px"></div>
+      <div class="ir-slider">
+        <label>Path Smoothing <span id="smooth-val">50%</span></label>
+        <input type="range" min="0" max="100" value="50"
+               oninput="document.getElementById('smooth-val').textContent=this.value+'%'">
+      </div>
+    </div>
+
+  </div>
+</div><!-- /tab-gps -->
+
+
+<!-- ================================================================
+     TAB 3 — NIGHT VISION
+     ================================================================ -->
+<div class="main-grid full-tab" id="tab-nightvision"
+     style="grid-template-columns:1fr 320px">
+
+  <!-- NV preview area -->
+  <div style="background:var(--bg);padding:20px;display:flex;flex-direction:column;gap:16px">
+    <div style="display:flex;align-items:center;gap:12px">
+      <img src="images/nightvision-icon.svg" width="32" height="32" alt="Night Vision" style="opacity:0.8">
+      <div>
+        <div style="font-family:var(--head);font-size:18px;letter-spacing:3px;color:var(--accent2)">NIGHT VISION · IR SYSTEM</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--textd);margin-top:2px;letter-spacing:2px">940nm INFRARED · LOW-LIGHT ENHANCEMENT · THERMAL OVERLAY</div>
+      </div>
+    </div>
+
+    <!-- IR canvas preview -->
+    <div class="nv-preview" id="nv-preview" style="flex:1;min-height:380px">
+      <canvas id="nv-canvas"></canvas>
+      <div class="nv-badge">IR ACTIVE</div>
+      <div style="position:absolute;top:12px;left:12px;font-family:var(--mono);font-size:10px;color:rgba(0,255,136,0.7)">
+        <div>MODE: <span id="nv-mode-label">STANDARD</span></div>
+        <div>GAIN: <span id="nv-gain-label">AUTO</span></div>
+      </div>
+    </div>
+
+    <!-- NV stats row -->
+    <div class="nv-stats">
+      <div class="map-stat"><div class="map-stat-label">Visibility</div><div class="map-stat-val" id="nv-vis" style="color:var(--accent2)">8m</div></div>
+      <div class="map-stat"><div class="map-stat-label">IR Power</div><div class="map-stat-val"  id="nv-pwr">75%</div></div>
+      <div class="map-stat"><div class="map-stat-label">Temp</div><div class="map-stat-val"       id="nv-temp" style="color:var(--warn)">38°C</div></div>
+    </div>
+  </div>
+
+  <!-- NV right controls -->
+  <div class="right-panel" style="border-left:1px solid var(--border2)">
+
+    <div class="section">
+      <div class="section-title">IR Controls</div>
+      <div class="ir-slider">
+        <label>IR LED Intensity <span id="ir-int-val">75%</span></label>
+        <input type="range" min="0" max="100" value="75" oninput="setIRIntensity(this.value)">
+      </div>
+      <div style="height:12px"></div>
+      <div class="ir-slider">
+        <label>Image Gain <span id="ir-gain-val">Auto</span></label>
+        <input type="range" min="0" max="100" value="50" oninput="setGain(this.value)">
+      </div>
+      <div style="height:12px"></div>
+      <div class="ir-slider">
+        <label>Exposure <span id="ir-exp-val">500ms</span></label>
+        <input type="range" min="100" max="2000" value="500"
+               oninput="document.getElementById('ir-exp-val').textContent=this.value+'ms'">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Vision Mode</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn" id="mode-standard" onclick="setNVMode('STANDARD')"
+                style="text-align:left;border-color:var(--accent2)">● Standard IR</button>
+        <button class="btn" id="mode-enhanced" onclick="setNVMode('ENHANCED')"
+                style="text-align:left">○ Enhanced Edge</button>
+        <button class="btn" id="mode-thermal"  onclick="setNVMode('THERMAL')"
+                style="text-align:left">○ Thermal Palette</button>
+        <button class="btn" id="mode-bw"       onclick="setNVMode('B&W')"
+                style="text-align:left">○ High Contrast B/W</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Detection Zones</div>
+      <div class="control-grid">
+        <div class="ctrl-card" id="ctrl-motion" onclick="toggleCtrl('motion')">
+          <div class="ctrl-name">Motion Detect</div>
+          <div class="ctrl-toggle">
+            <div class="toggle green-t" id="tog-motion"></div>
+            <div class="ctrl-status off" id="stat-motion">OFF</div>
+          </div>
+        </div>
+        <div class="ctrl-card" id="ctrl-alert" onclick="toggleCtrl('alert')">
+          <div class="ctrl-name">IR Alert</div>
+          <div class="ctrl-toggle">
+            <div class="toggle green-t" id="tog-alert"></div>
+            <div class="ctrl-status off" id="stat-alert">OFF</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div><!-- /tab-nightvision -->
+
+
+<!-- ================================================================
+     TAB 4 — ADVANTAGES
+     ================================================================ -->
+<div class="full-tab" id="tab-advantages"
+     style="padding:32px;max-width:1100px;margin:0 auto;width:100%">
+
+  <!-- Header with car diagram -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px;flex-wrap:wrap;gap:24px">
+    <div>
+      <div style="font-family:var(--head);font-size:24px;letter-spacing:4px;color:var(--accent)">SYSTEM ADVANTAGES</div>
+      <div style="font-family:var(--mono);font-size:11px;color:var(--textd);margin-top:6px;letter-spacing:2px">
+        RIZZ 3.0 · ESP32 SURVEILLANCE PLATFORM
+      </div>
+    </div>
+    <img src="images/car-diagram.svg" width="220" height="126"
+         alt="ESP32 Surveillance Car Diagram"
+         style="border:1px solid var(--border2);border-radius:8px;opacity:0.85">
+  </div>
+
+  <!-- Advantage cards -->
+  <div class="adv-list">
+
+    <div class="adv-item">
+      <div class="adv-num">01</div>
+      <div>
+        <div class="adv-title">High Performance &amp; Cost-Effectiveness</div>
+        <div class="adv-desc">The ESP32 dual-core 240&nbsp;MHz processor delivers powerful real-time processing at a fraction of traditional surveillance costs. Built-in WiFi 802.11&nbsp;b/g/n and Bluetooth&nbsp;4.2 eliminate the need for external networking hardware, reducing BOM costs by up to 60% versus comparable solutions.</div>
+      </div>
+    </div>
+
+    <div class="adv-item">
+      <div class="adv-num">02</div>
+      <div>
+        <div class="adv-title">Live Video Feed and Mobility</div>
+        <div class="adv-desc">The OV2640 camera module on ESP32-CAM provides 2MP live MJPEG streaming accessible from any browser on the local network. The differential drive system enables 360° maneuverability, allowing remote inspection of confined, hazardous, or inaccessible areas in real time.</div>
+      </div>
+    </div>
+
+    <div class="adv-item">
+      <div class="adv-num">03</div>
+      <div>
+        <div class="adv-title">All-Day Operations (Night Vision &amp; Infrared)</div>
+        <div class="adv-desc">940&nbsp;nm IR LEDs provide covert illumination invisible to the human eye, enabling 24/7 surveillance without a visible light signature. The ESP32-CAM's adjustable gain and exposure allow clear imaging in near-zero lux conditions up to 8–10 metres, making it effective in complete darkness.</div>
+      </div>
+    </div>
+
+    <div class="adv-item">
+      <div class="adv-num">04</div>
+      <div>
+        <div class="adv-title">Advanced Tracking and Connectivity</div>
+        <div class="adv-desc">Integrated NEO-6M GPS module provides sub-3&nbsp;m accuracy for real-time path recording and replay. The system maintains a persistent TCP connection for control commands while streaming video over HTTP — supporting simultaneous operation via the dual-core architecture without latency tradeoffs.</div>
+      </div>
+    </div>
+
+    <div class="adv-item">
+      <div class="adv-num">05</div>
+      <div>
+        <div class="adv-title">Smart Features &amp; Versatility</div>
+        <div class="adv-desc">Beyond surveillance, the RIZZ&nbsp;3.0 platform supports motion-triggered recording, autonomous path replay, OTA firmware updates, and expandable I²C sensors. The modular design supports ultrasonic obstacle avoidance, environmental sensing, and edge AI inference directly on the ESP32 for fully autonomous operation.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Technical specs table -->
+  <div style="margin-top:32px;padding:24px;background:var(--bg2);border:1px solid var(--border2);border-radius:8px">
+    <div style="font-family:var(--head);font-size:12px;letter-spacing:3px;color:var(--textd);margin-bottom:16px">
+      TECHNICAL SPECIFICATIONS
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;font-family:var(--mono);font-size:12px;color:var(--textd);line-height:2">
+      <div>
+        <div style="color:var(--accent);font-size:10px;letter-spacing:2px;margin-bottom:6px">PROCESSOR</div>
+        ESP32 Dual Core<br>240&nbsp;MHz Xtensa LX6<br>520&nbsp;KB SRAM
+      </div>
+      <div>
+        <div style="color:var(--accent);font-size:10px;letter-spacing:2px;margin-bottom:6px">CAMERA</div>
+        OV2640 2MP<br>MJPEG / JPEG<br>1600×1200 max
+      </div>
+      <div>
+        <div style="color:var(--accent);font-size:10px;letter-spacing:2px;margin-bottom:6px">CONNECTIVITY</div>
+        WiFi 802.11&nbsp;b/g/n<br>Bluetooth 4.2 BLE<br>TCP/UDP/HTTP
+      </div>
+      <div>
+        <div style="color:var(--accent);font-size:10px;letter-spacing:2px;margin-bottom:6px">GPS MODULE</div>
+        NEO-6M GNSS<br>≤3&nbsp;m Accuracy<br>1–10&nbsp;Hz Update
+      </div>
+      <div>
+        <div style="color:var(--accent);font-size:10px;letter-spacing:2px;margin-bottom:6px">DRIVE SYSTEM</div>
+        L298N H-Bridge<br>DC Motor × 4<br>PWM Speed Control
+      </div>
+      <div>
+        <div style="color:var(--accent);font-size:10px;letter-spacing:2px;margin-bottom:6px">POWER</div>
+        7.4V LiPo 2000&nbsp;mAh<br>≈2&nbsp;hr Runtime<br>USB-C Charging
+      </div>
+    </div>
+  </div>
+
+  <!-- Access info -->
+  <div style="margin-top:20px;padding:16px 20px;background:rgba(0,212,255,0.04);border:1px solid rgba(0,212,255,0.15);border-radius:6px;font-family:var(--mono);font-size:11px;color:var(--textd);line-height:2">
+    <span style="color:var(--accent);letter-spacing:2px">24/7 ACCESS · </span>
+    Host this folder on your ESP32's SPIFFS filesystem or any local HTTP server.
+    Open <span style="color:var(--accent2)">http://&lt;ESP32-IP&gt;/</span> from any device on the same WiFi network.
+    No internet connection required.
+  </div>
+
+</div><!-- /tab-advantages -->
+
+
+<!-- ================================================================
+     TOAST NOTIFICATION
+     ================================================================ -->
+<div id="toast"></div>
+
+<!-- ================================================================
+     JAVASCRIPT
+     ================================================================ -->
+<script src="script.js"></script>
+
+</body>
+</html>
